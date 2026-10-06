@@ -6,23 +6,27 @@ on:
 
 jobs:
   cmake-abi:
-    name: libuv ${{ matrix.libuv }} (${{ matrix.expect }})
+    name: ${{ matrix.name }}
     runs-on: windows-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         include:
-          # The uTox hang used this trio. libuv 1.53 alone, with cmake 4.4.3
-          # and cygwin 3.6.10, returns from the ABI check instead of hanging.
-          - libuv: 1.53.0-1
-            cmake: 4.4.4-1
-            cygwin: 3.6.11-1
+          # Same packages as the hung µTox job. The two-line project returns
+          # from the ABI check. These modes add one piece of that configure.
+          - name: toolchain
+            mode: toolchain
             expect: hang
-          - libuv: 1.52.1-1
-            cmake: 4.4.4-1
-            cygwin: 3.6.11-1
-            expect: ok
+            packages: cmake=4.4.4-1 libuv1=1.53.0-1 cygwin=3.6.11-1 mingw64-x86_64-gcc-core mingw64-x86_64-gcc-g++ mingw64-x86_64-headers mingw64-x86_64-windows-default-manifest mingw64-x86_64-binutils make
+          - name: toxcore flags
+            mode: toxcore-flags
+            expect: hang
+            packages: cmake=4.4.4-1 libuv1=1.53.0-1 cygwin=3.6.11-1 mingw64-x86_64-gcc-core mingw64-x86_64-gcc-g++ mingw64-x86_64-binutils make
+          - name: toxcore tree
+            mode: toxcore-tree
+            expect: hang
+            packages: cmake=4.4.4-1 libuv1=1.53.0-1 cygwin=3.6.11-1 mingw64-x86_64-gcc-core mingw64-x86_64-gcc-g++ mingw64-x86_64-binutils make git
     steps:
       - uses: actions/checkout@v7
 
@@ -30,19 +34,14 @@ jobs:
         uses: cygwin/cygwin-install-action@v6
         with:
           add-to-path: false
-          packages: >
-            cmake=${{ matrix.cmake }}
-            libuv1=${{ matrix.libuv }}
-            cygwin=${{ matrix.cygwin }}
-            mingw64-x86_64-gcc-core
-            mingw64-x86_64-gcc-g++
-            make
+          packages: ${{ matrix.packages }}
 
       - name: Run ABI check
         shell: D:\cygwin\bin\bash.exe --login -eo pipefail -o igncr '{0}'
         env:
           CHERE_INVOKING: "1"
           EXPECT: ${{ matrix.expect }}
+          MODE: ${{ matrix.mode }}
         run: |
           cd "$(cygpath -u "$GITHUB_WORKSPACE")"
           sh ./run.sh
