@@ -1,7 +1,7 @@
 #!/bin/sh
 # EXPECT=hang: cmake must still be running after 60s.
 # EXPECT=ok: cmake must finish.
-# MODE=plain | toolchain | toxcore-flags | toxcore-tree
+# MODE=plain | toolchain | toxcore-flags | toxcore-tree | stdbuf | sodium
 set -eu
 
 echo "=== mode ${MODE:-plain} ==="
@@ -21,6 +21,11 @@ apply_utox_env() {
     export LD_LIBRARY_PATH="$CACHE_DIR/usr/lib:/usr/lib"
     export PKG_CONFIG_PATH="$CACHE_DIR/usr/lib/pkgconfig"
     export MAKEFLAGS="-j8"
+    export GIT_CONFIG_COUNT=2
+    export GIT_CONFIG_KEY_0=core.autocrlf
+    export GIT_CONFIG_VALUE_0=false
+    export GIT_CONFIG_KEY_1=core.eol
+    export GIT_CONFIG_VALUE_1=lf
     export TARGET_HOST="--host=x86_64-w64-mingw32"
     export TARGET_TRGT="--target=x86_64-win64-gcc"
     export CROSS="x86_64-w64-mingw32-"
@@ -53,7 +58,24 @@ run_cmake() {
             -DSTATIC_ALL=ON \
             -DCMAKE_BUILD_TYPE=Release
         ;;
-    toxcore-flags|toxcore-tree)
+    stdbuf)
+        apply_utox_env
+        stdbuf -oL -eL cmake --debug-trycompile \
+            -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc \
+            -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ \
+            -DCMAKE_RC_COMPILER=x86_64-w64-mingw32-windres \
+            -DCMAKE_SYSTEM_NAME=Windows \
+            -DCMAKE_FIND_ROOT_PATH="$CACHE_DIR/usr" \
+            -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
+            -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+            -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
+            -DCMAKE_INSTALL_PREFIX:PATH="$CACHE_DIR/usr" \
+            -DCMAKE_PREFIX_PATH="$CACHE_DIR/usr" \
+            -DENABLE_SHARED=OFF \
+            -DENABLE_STATIC=ON \
+            -B_build -H.
+        ;;
+    sodium|toxcore-flags|toxcore-tree)
         apply_utox_env
         cmake \
             -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc \
@@ -96,7 +118,24 @@ toxcore-tree)
         https://github.com/TokTok/c-toxcore.git toxcore
     cd toxcore
     ;;
-toxcore-flags)
+toxcore-flags|stdbuf)
+    ;;
+sodium)
+    apply_utox_env
+    rm -rf libsodium
+    git clone --depth=1 --branch=1.0.22-RELEASE https://github.com/jedisct1/libsodium.git
+    (
+        cd libsodium
+        ./autogen.sh
+        set +e
+        ./configure --host=x86_64-w64-mingw32 \
+            --prefix="$CACHE_DIR/usr" \
+            --disable-shared \
+            --enable-static
+        echo "sodium configure exit $?"
+    )
+    make -C libsodium -j8
+    make -C libsodium install
     ;;
 *)
     echo "unknown MODE=$MODE" >&2
@@ -119,7 +158,7 @@ while kill -0 "$pid" 2>/dev/null; do
     if [ "$waited" -ge 60 ]; then
         echo "=== cmake still running after ${waited}s ==="
         ps -ef || true
-        ps -W | grep -E -i 'gcc|g\+\+|collect2|cc1|windres|ld\.exe|cmake|make' || true
+        ps -W || true
         echo "=== try_compile dirs ==="
         find . \( -path '*TryCompile*' -o -path '*CMakeTmp*' \) -print || true
         if [ "${EXPECT:-ok}" = "hang" ]; then

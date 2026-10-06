@@ -18,11 +18,18 @@ Linux, AIX, or PASE ([libuv#3520](https://github.com/libuv/libuv/pull/3520)).
 [`.github/workflows/repro.yml`](.github/workflows/repro.yml) keeps the hung
 package trio and changes one piece of the µTox configure:
 
+Toolchain, the c-toxcore arguments, and a c-toxcore checkout all return from
+the ABI check. The hung µTox job also had the full Cygwin package list,
+`stdbuf -oL cmake --debug-trycompile`, and a library install in the same
+shell before `cmake`. The workflow probes those three.
+
 | job | what it adds | expected |
 |---|---|---|
-| toolchain | `toolchain-win64.cmake` and the µTox env (`CFLAGS`, `LDFLAGS`, `MAKEFLAGS`) | still running after 60s |
-| toxcore flags | the c-toxcore `cmake` arguments and the same env, on this two-line project | still running after 60s |
-| toxcore tree | that same command in a checkout of c-toxcore v0.2.23 | still running after 60s |
+| full packages | the µTox package list, then cmake in c-toxcore v0.2.23 | still running after 60s |
+| stdbuf | `stdbuf -oL -eL cmake --debug-trycompile` with the toxcore arguments | still running after 60s |
+| after libsodium | build and install libsodium, then the same cmake in that shell | still running after 60s |
 
 A red job whose log says `RESULT: hang reproduced` is the missing piece.
 `RESULT: cmake finished` means that piece is not enough.
+
+µTox itself stays on libuv 1.52.1 until this hang has a smaller repro.

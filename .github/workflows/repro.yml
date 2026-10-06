@@ -13,20 +13,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Same packages as the hung µTox job. The two-line project returns
-          # from the ABI check. These modes add one piece of that configure.
-          - name: toolchain
-            mode: toolchain
-            expect: hang
-            packages: cmake=4.4.4-1 libuv1=1.53.0-1 cygwin=3.6.11-1 mingw64-x86_64-gcc-core mingw64-x86_64-gcc-g++ mingw64-x86_64-headers mingw64-x86_64-windows-default-manifest mingw64-x86_64-binutils make
-          - name: toxcore flags
-            mode: toxcore-flags
-            expect: hang
-            packages: cmake=4.4.4-1 libuv1=1.53.0-1 cygwin=3.6.11-1 mingw64-x86_64-gcc-core mingw64-x86_64-gcc-g++ mingw64-x86_64-binutils make
-          - name: toxcore tree
+          # Toolchain, toxcore flags, and the toxcore tree already returned.
+          # These three are what the hung job still had on top of that.
+          - name: full packages
             mode: toxcore-tree
             expect: hang
-            packages: cmake=4.4.4-1 libuv1=1.53.0-1 cygwin=3.6.11-1 mingw64-x86_64-gcc-core mingw64-x86_64-gcc-g++ mingw64-x86_64-binutils make git
+            packages: cmake=4.4.4-1 libuv1=1.53.0-1 cygwin=3.6.11-1 mingw64-x86_64-gcc-core mingw64-x86_64-gcc-g++ mingw64-x86_64-headers mingw64-x86_64-windows-default-manifest mingw64-x86_64-binutils make git curl autoconf automake libtool pkg-config yasm nasm patch perl file
+          - name: stdbuf
+            mode: stdbuf
+            expect: hang
+            packages: cmake=4.4.4-1 libuv1=1.53.0-1 cygwin=3.6.11-1 mingw64-x86_64-gcc-core mingw64-x86_64-gcc-g++ mingw64-x86_64-binutils make
+          - name: after libsodium
+            mode: sodium
+            expect: hang
+            packages: cmake=4.4.4-1 libuv1=1.53.0-1 cygwin=3.6.11-1 mingw64-x86_64-gcc-core mingw64-x86_64-gcc-g++ mingw64-x86_64-binutils make git autoconf automake libtool pkg-config
     steps:
       - uses: actions/checkout@v7
 
