@@ -6,27 +6,17 @@ on:
 
 jobs:
   cmake-abi:
-    name: ${{ matrix.name }}
+    name: libuv ${{ matrix.libuv }} (${{ matrix.expect }})
     runs-on: windows-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Toolchain, toxcore flags, and the toxcore tree already returned.
-          # These three are what the hung job still had on top of that.
-          - name: full packages
-            mode: toxcore-tree
+          - libuv: 1.52.1-1
+            expect: ok
+          - libuv: 1.53.0-1
             expect: hang
-            packages: cmake=4.4.4-1 libuv1=1.53.0-1 cygwin=3.6.11-1 mingw64-x86_64-gcc-core mingw64-x86_64-gcc-g++ mingw64-x86_64-headers mingw64-x86_64-windows-default-manifest mingw64-x86_64-binutils make git curl autoconf automake libtool pkg-config yasm nasm patch perl file
-          - name: stdbuf
-            mode: stdbuf
-            expect: hang
-            packages: cmake=4.4.4-1 libuv1=1.53.0-1 cygwin=3.6.11-1 mingw64-x86_64-gcc-core mingw64-x86_64-gcc-g++ mingw64-x86_64-binutils make
-          - name: after libsodium
-            mode: sodium
-            expect: hang
-            packages: cmake=4.4.4-1 libuv1=1.53.0-1 cygwin=3.6.11-1 mingw64-x86_64-gcc-core mingw64-x86_64-gcc-g++ mingw64-x86_64-binutils make git autoconf automake libtool pkg-config
     steps:
       - uses: actions/checkout@v7
 
@@ -34,14 +24,13 @@ jobs:
         uses: cygwin/cygwin-install-action@v6
         with:
           add-to-path: false
-          packages: ${{ matrix.packages }}
+          packages: cmake=4.4.4-1 libuv1=${{ matrix.libuv }} cygwin=3.6.11-1 mingw64-x86_64-gcc-core mingw64-x86_64-gcc-g++ mingw64-x86_64-binutils make
 
       - name: Run ABI check
         shell: D:\cygwin\bin\bash.exe --login -eo pipefail -o igncr '{0}'
         env:
           CHERE_INVOKING: "1"
           EXPECT: ${{ matrix.expect }}
-          MODE: ${{ matrix.mode }}
         run: |
           cd "$(cygpath -u "$GITHUB_WORKSPACE")"
           sh ./run.sh
