@@ -1,16 +1,46 @@
 diff --git a/src/unix/process.c b/src/unix/process.c
+index 5d8d6fa..cb20555 100644
 --- a/src/unix/process.c
 +++ b/src/unix/process.c
-@@ -1128,6 +1128,12 @@
+@@ -1050,6 +1050,9 @@ int uv_spawn(uv_loop_t* loop,
+   int err;
+   int exec_errorno;
+   int i;
++#ifdef UV_USE_SIGCHLD
++  sigset_t chld_set, chld_old;
++#endif
+ 
+   assert(options->file != NULL);
+   assert(!(options->flags & ~(UV_PROCESS_DETACHED |
+@@ -1091,6 +1094,13 @@ int uv_spawn(uv_loop_t* loop,
+ 
+ #ifdef UV_USE_SIGCHLD
+   uv_signal_start(&loop->child_watcher, uv__chld, SIGCHLD);
++  /* Hold SIGCHLD until this child is queued. Otherwise the handler can
++   * run first, uv__wait_children does not see the pid, and the signal is
++   * not delivered again. posix_spawn sets the child's mask itself. */
++  sigemptyset(&chld_set);
++  sigaddset(&chld_set, SIGCHLD);
++  if (pthread_sigmask(SIG_BLOCK, &chld_set, &chld_old) != 0)
++    abort();
+ #endif
+ 
+   /* Spawn the child */
+@@ -1128,8 +1138,17 @@ int uv_spawn(uv_loop_t* loop,
      process->exit_cb = options->exit_cb;
      uv__queue_insert_tail(&loop->process_handles, &process->queue);
      uv__handle_start(process);
 +#ifdef UV_USE_SIGCHLD
-+    /* SIGCHLD can be handled after uv_signal_start and before this
-+     * insert. That pass does not see this pid, and the signal is not
-+     * delivered again. waitpid(WNOHANG) still reaps the queued zombie. */
++    /* The child may already be a zombie. The handler has not run. */
 +    uv__wait_children(loop);
 +#endif
    }
  
++#ifdef UV_USE_SIGCHLD
++  if (pthread_sigmask(SIG_SETMASK, &chld_old, NULL) != 0)
++    abort();
++#endif
++
    for (i = 0; i < options->stdio_count; i++) {
+     err = uv__process_open_stream(options->stdio + i, pipes[i]);
+     if (err == 0)

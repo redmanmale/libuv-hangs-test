@@ -29,6 +29,10 @@ dump_hang() {
   ps -ef || true
   echo "=== fds ==="
   ls -l "/proc/$p/fd" || true
+  # tee reads cmake.fifo until cmake closes it. Kill first or this wait
+  # never returns and the job sits until it is cancelled.
+  kill -9 "$p" 2>/dev/null || true
+  wait "$p" 2>/dev/null || true
   wait "$teepid" 2>/dev/null || true
   echo "=== cmake tail ==="
   tail -n 40 cmake.out || true
