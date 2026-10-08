@@ -40,7 +40,7 @@ jobs:
           exit 0
 
   cmake-strace:
-    name: strace the CMake hang
+    name: waitpid inside hung cmake
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
@@ -50,20 +50,19 @@ jobs:
         uses: cygwin/cygwin-install-action@v6
         with:
           add-to-path: false
-          packages: cmake=4.4.4-1 libuv1=1.53.0-1 cygwin=3.6.11-1 mingw64-x86_64-gcc-core mingw64-x86_64-gcc-g++ mingw64-x86_64-binutils strace
+          packages: cmake=4.4.4-1 libuv1=1.53.0-1 cygwin=3.6.11-1 cygwin-debuginfo=3.6.11-1 mingw64-x86_64-gcc-core mingw64-x86_64-gcc-g++ mingw64-x86_64-binutils gdb
 
-      - name: Trace cmake until it hangs
+      - name: On hang, waitpid inside cmake
         shell: D:\cygwin\bin\bash.exe --login -eo pipefail -o igncr '{0}'
         env:
           CHERE_INVOKING: "1"
         run: |
           cd "$(cygpath -u "$GITHUB_WORKSPACE")"
           i=1
-          while [ "$i" -le 12 ]; do
-            rm -rf _build cmake.out strace.txt
+          while [ "$i" -le 15 ]; do
+            rm -rf _build cmake.out
             echo "=== attempt $i ==="
-            strace --output=strace.txt --mask=sigp --flush-period=1 \
-              cmake --debug-trycompile \
+            cmake --debug-trycompile \
               -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc \
               -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ \
               -DCMAKE_RC_COMPILER=x86_64-w64-mingw32-windres \
@@ -74,16 +73,25 @@ jobs:
             while kill -0 "$pid" 2>/dev/null; do
               sleep 1
               waited=$((waited + 1))
-              if [ "$waited" -ge 25 ]; then
+              if [ "$waited" -ge 20 ]; then
                 echo "HANG attempt $i pid=$pid"
-                echo "=== matching strace lines ==="
-                grep -E -i 'spawn|wait|sig|proc_|child|exec' strace.txt | tail -n 120 || true
-                echo "=== strace tail ==="
-                tail -n 30 strace.txt || true
-                wc -c strace.txt || true
+                ps -ef || true
+                echo "=== fds ==="
+                ls -l "/proc/$pid/fd" || true
+                echo "=== waitpid and stack ==="
+                gdb -batch -n -p "$pid" \
+                  -ex 'set pagination off' \
+                  -ex 'set debug-file-directory /usr/lib/debug' \
+                  -ex 'set $st = -999' \
+                  -ex 'print (int)waitpid(-1, &$st, 1)' \
+                  -ex 'print $st' \
+                  -ex 'print errno' \
+                  -ex 'thread 1' \
+                  -ex 'bt 12' || true
                 echo "=== cmake tail ==="
-                tail -n 20 cmake.out || true
-                kill -9 "$pid" 2>/dev/null || true
+                tail -n 15 cmake.out || true
+                hangpid=$pid
+                kill -9 "$hangpid" 2>/dev/null || true
                 exit 0
               fi
             done
@@ -91,5 +99,5 @@ jobs:
             echo "FINISHED attempt $i in ${waited}s"
             i=$((i + 1))
           done
-          echo "SUMMARY no hang in 12 attempts"
+          echo "SUMMARY no hang in 15 attempts"
           exit 0
