@@ -17,14 +17,17 @@ dump_hang() {
   gdb -batch -n -p "$p" \
     -ex 'set pagination off' \
     -ex 'set debug-file-directory /usr/lib/debug' \
-    -ex 'set $st = -999' \
-    -ex 'printf "wait1 %d st %d errno %d\n", (int)waitpid(-1, &$st, 1), $st, errno' \
-    -ex 'set $st = -999' \
-    -ex 'printf "wait2 %d st %d errno %d\n", (int)waitpid(-1, &$st, 1), $st, errno' \
-    -ex 'set $st = -999' \
-    -ex 'printf "wait3 %d st %d errno %d\n", (int)waitpid(-1, &$st, 1), $st, errno' \
     -ex 'thread 1' \
-    -ex 'bt 8' || true
+    -ex 'frame function select' \
+    -ex 'info args' \
+    -ex 'set $box = (int *) malloc(4)' \
+    -ex 'set *$box = -1' \
+    -ex 'printf "wait %d st %d errno %d\n", (int)waitpid(-1, $box, 1), *$box, *__errno()' \
+    -ex 'set *$box = -1' \
+    -ex 'printf "wait %d st %d errno %d\n", (int)waitpid(-1, $box, 1), *$box, *__errno()' \
+    -ex 'set *$box = -1' \
+    -ex 'printf "wait %d st %d errno %d\n", (int)waitpid(-1, $box, 1), *$box, *__errno()' \
+    -ex 'bt 12' || true
   echo "=== cmake tail ==="
   tail -n 20 cmake.out || true
 }
