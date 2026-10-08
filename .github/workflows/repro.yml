@@ -34,3 +34,52 @@ jobs:
         run: |
           cd "$(cygpath -u "$GITHUB_WORKSPACE")"
           sh ./run.sh
+
+  patched:
+    name: libuv cygwin-use-fork (ok)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Cygwin
+        uses: cygwin/cygwin-install-action@v6
+        with:
+          add-to-path: false
+          packages: cmake=4.4.4-1 libuv1=1.53.0-1 cygwin=3.6.11-1 mingw64-x86_64-gcc-core mingw64-x86_64-gcc-g++ mingw64-x86_64-binutils make gcc-core autoconf automake libtool git
+
+      - name: Build patched libuv and run ABI check
+        shell: D:\cygwin\bin\bash.exe --login -eo pipefail -o igncr '{0}'
+        env:
+          CHERE_INVOKING: "1"
+          EXPECT: ok
+        run: |
+          set -eu
+          cd "$(cygpath -u "$GITHUB_WORKSPACE")"
+          src="$HOME/libuv-src"
+          rm -rf "$src"
+          git clone --branch cygwin-use-fork --depth 1 -c core.autocrlf=false \
+            https://github.com/redmanmale/libuv.git "$src"
+          echo "libuv SHA: $(git -C "$src" rev-parse HEAD)"
+          cd "$src"
+          ./autogen.sh
+          ./configure
+          make -j"$(nproc)"
+          dll="$src/.libs/cyguv-1.dll"
+          if [ ! -f "$dll" ]; then
+            echo "expected $dll after autotools build"
+            ls -la "$src/.libs" || true
+            exit 1
+          fi
+          echo "=== cmake libuv dependency ==="
+          cygcheck /usr/bin/cmake.exe || true
+          if ! cygcheck /usr/bin/cmake.exe 2>/dev/null | grep -Eiq 'cyguv-1\.dll'; then
+            echo "cmake is not linked to cyguv-1.dll; replacement would not take effect"
+            exit 1
+          fi
+          cp -f /usr/bin/cyguv-1.dll /usr/bin/cyguv-1.dll.stock
+          cp -f "$dll" /usr/bin/cyguv-1.dll
+          cmp /usr/bin/cyguv-1.dll "$dll"
+          echo "replaced /usr/bin/cyguv-1.dll with $dll"
+          cd "$(cygpath -u "$GITHUB_WORKSPACE")"
+          sh ./run.sh
