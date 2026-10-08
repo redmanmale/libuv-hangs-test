@@ -14,30 +14,51 @@ dump_hang() {
   echo "=== fds ==="
   ls -l "/proc/$p/fd" || true
   echo "=== waitpid and stack ==="
-  gdb -batch -n -p "$p" \
-    -ex 'set pagination off' \
-    -ex 'set debug-file-directory /usr/lib/debug' \
-    -ex 'thread 1' \
-    -ex 'frame function select' \
-    -ex 'info args' \
-    -ex 'set $box = (int *)($rsp - 128)' \
-    -ex 'set {int}$box = -1' \
-    -ex 'printf "wait %d\n", (int)waitpid(-1, $box, 1)' \
-    -ex 'x/wx $box' \
-    -ex 'printf "errno %d\n", *__errno()' \
-    -ex 'set {int}$box = -1' \
-    -ex 'printf "wait %d\n", (int)waitpid(-1, $box, 1)' \
-    -ex 'x/wx $box' \
-    -ex 'bt 12' >gdb.txt 2>&1 &
+  cat > dump.gdb << 'EOF'
+set pagination off
+set debug-file-directory /usr/lib/debug
+thread 1
+frame function pselect
+info args
+python
+import gdb
+inf = gdb.selected_inferior()
+chosen = None
+for t in inf.threads():
+    t.switch()
+    nm = gdb.newest_frame().name() or ""
+    print("thr %s %s" % (t.num, nm))
+    if "DbgBreak" in nm or "Breakin" in nm:
+        chosen = t.num
+if chosen is None:
+    print("no breakin thread")
+else:
+    gdb.execute("thread %d" % chosen)
+    gdb.execute("set $box = (int *)($rsp - 256)")
+    gdb.execute("set {int}$box = -1")
+    gdb.execute('printf "wait %d\\n", (int)waitpid(-1, $box, 1)')
+    gdb.execute("x/wx $box")
+    gdb.execute('printf "errno %d\\n", *__errno()')
+end
+EOF
+  gdb -batch -n -p "$p" -x dump.gdb >gdb.txt 2>&1 &
   gpid=$!
   w=0
-  while kill -0 "$gpid" 2>/dev/null && [ "$w" -lt 25 ]; do
+  while kill -0 "$gpid" 2>/dev/null && [ "$w" -lt 20 ]; do
     sleep 1
     w=$((w + 1))
   done
   kill -9 "$gpid" 2>/dev/null || true
   wait "$gpid" 2>/dev/null || true
   cat gdb.txt || true
+  echo "=== SIGCHLD poke ==="
+  kill -CHLD "$p" 2>/dev/null || kill -20 "$p" 2>/dev/null || true
+  sleep 3
+  if kill -0 "$p" 2>/dev/null; then
+    echo "STILL HUNG after SIGCHLD"
+  else
+    echo "WOKE after SIGCHLD"
+  fi
   echo "=== cmake tail ==="
   tail -n 20 cmake.out || true
 }
