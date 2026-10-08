@@ -38,3 +38,58 @@ jobs:
           ./race 40 ignore /cygdrive/c/Windows/System32/cmd.exe /c exit
           echo "cmd_ignore_rc=$?"
           exit 0
+
+  cmake-strace:
+    name: strace the CMake hang
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Cygwin
+        uses: cygwin/cygwin-install-action@v6
+        with:
+          add-to-path: false
+          packages: cmake=4.4.4-1 libuv1=1.53.0-1 cygwin=3.6.11-1 mingw64-x86_64-gcc-core mingw64-x86_64-gcc-g++ mingw64-x86_64-binutils strace
+
+      - name: Trace cmake until it hangs
+        shell: D:\cygwin\bin\bash.exe --login -eo pipefail -o igncr '{0}'
+        env:
+          CHERE_INVOKING: "1"
+        run: |
+          cd "$(cygpath -u "$GITHUB_WORKSPACE")"
+          i=1
+          while [ "$i" -le 12 ]; do
+            rm -rf _build cmake.out strace.txt
+            echo "=== attempt $i ==="
+            strace --output=strace.txt --mask=sigp --flush-period=1 \
+              cmake --debug-trycompile \
+              -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc \
+              -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ \
+              -DCMAKE_RC_COMPILER=x86_64-w64-mingw32-windres \
+              -DCMAKE_SYSTEM_NAME=Windows \
+              -B_build -H. >cmake.out 2>&1 &
+            pid=$!
+            waited=0
+            while kill -0 "$pid" 2>/dev/null; do
+              sleep 1
+              waited=$((waited + 1))
+              if [ "$waited" -ge 25 ]; then
+                echo "HANG attempt $i pid=$pid"
+                echo "=== matching strace lines ==="
+                grep -E -i 'spawn|wait|sig|proc_|child|exec' strace.txt | tail -n 120 || true
+                echo "=== strace tail ==="
+                tail -n 30 strace.txt || true
+                wc -c strace.txt || true
+                echo "=== cmake tail ==="
+                tail -n 20 cmake.out || true
+                kill -9 "$pid" 2>/dev/null || true
+                exit 0
+              fi
+            done
+            wait "$pid" || true
+            echo "FINISHED attempt $i in ${waited}s"
+            i=$((i + 1))
+          done
+          echo "SUMMARY no hang in 12 attempts"
+          exit 0
