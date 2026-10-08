@@ -1,6 +1,10 @@
 name: hang
 
 on:
+  push:
+    paths:
+      - '.github/workflows/hang.yml'
+      - 'hang.sh'
   workflow_dispatch:
 
 jobs:
