@@ -26,6 +26,7 @@ jobs:
         shell: D:\cygwin\bin\bash.exe --login -eo pipefail -o igncr '{0}'
         env:
           CHERE_INVOKING: "1"
+          TRIES: "40"
         run: |
           cd "$(cygpath -u "$GITHUB_WORKSPACE")"
           sh ./probe.sh
