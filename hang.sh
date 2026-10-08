@@ -20,14 +20,24 @@ dump_hang() {
     -ex 'thread 1' \
     -ex 'frame function select' \
     -ex 'info args' \
-    -ex 'set $box = (int *) malloc(4)' \
-    -ex 'set *$box = -1' \
-    -ex 'printf "wait %d st %d errno %d\n", (int)waitpid(-1, $box, 1), *$box, *__errno()' \
-    -ex 'set *$box = -1' \
-    -ex 'printf "wait %d st %d errno %d\n", (int)waitpid(-1, $box, 1), *$box, *__errno()' \
-    -ex 'set *$box = -1' \
-    -ex 'printf "wait %d st %d errno %d\n", (int)waitpid(-1, $box, 1), *$box, *__errno()' \
-    -ex 'bt 12' || true
+    -ex 'set $box = (int *)($rsp - 128)' \
+    -ex 'set {int}$box = -1' \
+    -ex 'printf "wait %d\n", (int)waitpid(-1, $box, 1)' \
+    -ex 'x/wx $box' \
+    -ex 'printf "errno %d\n", *__errno()' \
+    -ex 'set {int}$box = -1' \
+    -ex 'printf "wait %d\n", (int)waitpid(-1, $box, 1)' \
+    -ex 'x/wx $box' \
+    -ex 'bt 12' >gdb.txt 2>&1 &
+  gpid=$!
+  w=0
+  while kill -0 "$gpid" 2>/dev/null && [ "$w" -lt 25 ]; do
+    sleep 1
+    w=$((w + 1))
+  done
+  kill -9 "$gpid" 2>/dev/null || true
+  wait "$gpid" 2>/dev/null || true
+  cat gdb.txt || true
   echo "=== cmake tail ==="
   tail -n 20 cmake.out || true
 }
