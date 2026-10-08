@@ -1,0 +1,27 @@
+name: hang
+
+on:
+  workflow_dispatch:
+
+jobs:
+  waitpid:
+    name: waitpid inside hung cmake
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Cygwin
+        uses: cygwin/cygwin-install-action@v6
+        with:
+          add-to-path: false
+          packages: cmake=4.4.4-1 libuv1=1.53.0-1 cygwin=3.6.11-1 cygwin-debuginfo=3.6.11-1 mingw64-x86_64-gcc-core mingw64-x86_64-gcc-g++ mingw64-x86_64-binutils gdb
+
+      - name: Probe
+        shell: D:\cygwin\bin\bash.exe --login -eo pipefail -o igncr '{0}'
+        env:
+          CHERE_INVOKING: "1"
+          TRIES: "40"
+        run: |
+          cd "$(cygpath -u "$GITHUB_WORKSPACE")"
+          sh ./hang.sh
