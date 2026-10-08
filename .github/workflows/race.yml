@@ -1,0 +1,40 @@
+name: race
+
+on:
+  push:
+    paths:
+      - '.github/workflows/race.yml'
+      - 'race.c'
+  workflow_dispatch:
+
+jobs:
+  sigchld:
+    name: uv_spawn SIGCHLD race
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Cygwin
+        uses: cygwin/cygwin-install-action@v6
+        with:
+          add-to-path: false
+          packages: libuv1=1.53.0-1 libuv-devel=1.53.0-1 cygwin=3.6.11-1 gcc-core mingw64-x86_64-gcc-core
+
+      - name: Spawn short children through libuv
+        shell: D:\cygwin\bin\bash.exe --login -eo pipefail -o igncr '{0}'
+        env:
+          CHERE_INVOKING: "1"
+        run: |
+          cd "$(cygpath -u "$GITHUB_WORKSPACE")"
+          gcc -Wall -Wextra -o race race.c -luv
+          set +e
+          ./race 40 ignore /usr/bin/true
+          echo "true_ignore_rc=$?"
+          ./race 40 ignore /usr/bin/x86_64-w64-mingw32-gcc.exe --version
+          echo "mingw_ignore_rc=$?"
+          ./race 40 pipe /usr/bin/x86_64-w64-mingw32-gcc.exe --version
+          echo "mingw_pipe_rc=$?"
+          ./race 40 ignore /cygdrive/c/Windows/System32/cmd.exe /c exit
+          echo "cmd_ignore_rc=$?"
+          exit 0
