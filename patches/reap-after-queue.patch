@@ -1,0 +1,16 @@
+diff --git a/src/unix/process.c b/src/unix/process.c
+--- a/src/unix/process.c
++++ b/src/unix/process.c
+@@ -1128,6 +1128,12 @@
+     process->exit_cb = options->exit_cb;
+     uv__queue_insert_tail(&loop->process_handles, &process->queue);
+     uv__handle_start(process);
++#ifdef UV_USE_SIGCHLD
++    /* SIGCHLD can be handled after uv_signal_start and before this
++     * insert. That pass does not see this pid, and the signal is not
++     * delivered again. waitpid(WNOHANG) still reaps the queued zombie. */
++    uv__wait_children(loop);
++#endif
+   }
+ 
+   for (i = 0; i < options->stdio_count; i++) {

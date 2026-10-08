@@ -1,0 +1,59 @@
+name: confirm
+
+on:
+  push:
+    paths:
+      - '.github/workflows/confirm.yml'
+      - 'patches/reap-after-queue.patch'
+      - 'confirm.sh'
+  workflow_dispatch:
+
+jobs:
+  reap:
+    name: reap after queue then configure
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Clone libuv v1.53.0 and apply the reap patch
+        shell: pwsh
+        run: |
+          $src = Join-Path $env:GITHUB_WORKSPACE 'libuv-src'
+          if (Test-Path $src) { Remove-Item -Recurse -Force $src }
+          git -c core.autocrlf=false clone --depth 1 --branch v1.53.0 https://github.com/libuv/libuv.git $src
+          git -C $src rev-parse HEAD
+          git -C $src apply (Join-Path $env:GITHUB_WORKSPACE 'patches/reap-after-queue.patch')
+          git -C $src diff --stat
+
+      - name: Install Cygwin
+        uses: cygwin/cygwin-install-action@v6
+        with:
+          add-to-path: false
+          packages: cmake=4.4.4-1 libuv1=1.53.0-1 cygwin=3.6.11-1 autoconf automake libtool gcc-core make mingw64-x86_64-gcc-core mingw64-x86_64-gcc-g++ mingw64-x86_64-binutils
+
+      - name: Build patched cyguv-1.dll and run configures
+        shell: D:\cygwin\bin\bash.exe --login -eo pipefail -o igncr '{0}'
+        env:
+          CHERE_INVOKING: "1"
+          TRIES: "40"
+          LIMIT: "20"
+        run: |
+          set -eu
+          cd "$(cygpath -u "$GITHUB_WORKSPACE")"
+          src="$(cygpath -u "$GITHUB_WORKSPACE")/libuv-src"
+          cd "$src"
+          sh autogen.sh && ./configure && make
+          dll="$src/.libs/cyguv-1.dll"
+          if [ ! -f "$dll" ]; then
+            echo "patched DLL was not built: $dll"
+            ls -la "$src/.libs" || true
+            exit 1
+          fi
+          cp -f /usr/bin/cyguv-1.dll /usr/bin/cyguv-1.dll.stock
+          cp -f "$dll" /usr/bin/cyguv-1.dll
+          cmp /usr/bin/cyguv-1.dll "$dll"
+          echo "replaced /usr/bin/cyguv-1.dll with $dll"
+          echo "stock copy kept at /usr/bin/cyguv-1.dll.stock"
+          cd "$(cygpath -u "$GITHUB_WORKSPACE")"
+          sh ./confirm.sh
