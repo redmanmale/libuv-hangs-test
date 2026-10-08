@@ -69,7 +69,12 @@ cdb_handles() {
 .echo ==== stacks ====
 ~*k 30
 .echo ==== wfmo handles ====
-~*e .echo --- thread ---; r rcx; r rdx; r r8; .printf "count=%d rdx=%p\n", @rcx, @rdx; .if (@rcx >= 1 and @rcx <= 8) { .for (r $t0 = 0; @$t0 < @rcx; r $t0 = @$t0 + 1) { .printf "handle[%d]=%p\n", @$t0, poi(@rdx + @$t0 * 8); !handle poi(@rdx + @$t0 * 8) f } }
+~0s
+r rcx
+r rdx
+r r8
+.printf "count=%d rdx=%p\n", @rcx, @rdx
+.for (r $t0 = 0; @$t0 < 8; r $t0 = @$t0 + 1) { .if (@$t0 < @rcx) { .printf "handle[%d]=%p\n", @$t0, poi(@rdx+@$t0*8); !handle poi(@rdx+@$t0*8) f } }
 q
 EOF
   "$cdb" -p "$winpid" -logo cdb-out.txt -cf dump-wfmo.cdb >cdb-run.txt 2>&1 &
@@ -98,12 +103,12 @@ dump_hang() {
   gdb_pid "$root"
   cdb_handles "$root"
   for ent in /proc/[0-9]*; do
-    pid="${ent#/proc/}"
+    child="${ent#/proc/}"
     ppid="$(cat "$ent/ppid" 2>/dev/null || true)"
     if [ "$ppid" = "$root" ]; then
-      echo "child $pid"
-      dump_one "$pid"
-      gdb_pid "$pid"
+      echo "child $child"
+      dump_one "$child"
+      gdb_pid "$child"
     fi
   done
   echo "=== partial cmake output ==="
@@ -127,8 +132,9 @@ while [ "$i" -le "$TRIES" ]; do
     waited=$((waited + 1))
     if [ "$waited" -ge "$LIMIT" ]; then
       echo "HANG attempt $i after ${waited}s pid=$pid"
-      dump_hang "$pid"
-      kill -9 "$pid" 2>/dev/null || true
+      hangpid=$pid
+      dump_hang "$hangpid"
+      kill -9 "$hangpid" 2>/dev/null || true
       exit 0
     fi
   done
