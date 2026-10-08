@@ -22,9 +22,18 @@ frame function pselect
 info args
 python
 import gdb
-inf = gdb.selected_inferior()
+gdb.execute("thread 1")
+gdb.execute("frame function pselect")
+def bits(label, expr):
+    addr = int(gdb.parse_and_eval(expr))
+    word = int(gdb.parse_and_eval("*(unsigned long long*)%d" % addr))
+    on = [str(i) for i in range(64) if word & (1 << i)]
+    print("%s %s word=0x%x fds=%s" % (label, expr, word, ",".join(on)))
+bits("READ", "readfds")
+bits("WRITE", "writefds")
+bits("EXCEPT", "exceptfds")
 chosen = None
-for t in inf.threads():
+for t in gdb.selected_inferior().threads():
     t.switch()
     nm = gdb.newest_frame().name() or ""
     print("thr %s %s" % (t.num, nm))
@@ -51,14 +60,6 @@ EOF
   kill -9 "$gpid" 2>/dev/null || true
   wait "$gpid" 2>/dev/null || true
   cat gdb.txt || true
-  echo "=== SIGCHLD poke ==="
-  kill -CHLD "$p" 2>/dev/null || kill -20 "$p" 2>/dev/null || true
-  sleep 3
-  if kill -0 "$p" 2>/dev/null; then
-    echo "STILL HUNG after SIGCHLD"
-  else
-    echo "WOKE after SIGCHLD"
-  fi
   echo "=== cmake tail ==="
   tail -n 20 cmake.out || true
 }
