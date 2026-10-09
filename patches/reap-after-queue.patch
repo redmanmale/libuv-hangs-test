@@ -1,52 +1,19 @@
 --- a/src/unix/process.c
 +++ b/src/unix/process.c
-@@ -1050,6 +1050,10 @@
-   int err;
-   int exec_errorno;
-   int i;
-+#ifdef UV_USE_SIGCHLD
-+  sigset_t chld_set;
-+  sigset_t chld_old;
-+#endif
- 
-   assert(options->file != NULL);
-   assert(!(options->flags & ~(UV_PROCESS_DETACHED |
-@@ -1091,6 +1095,15 @@
- 
- #ifdef UV_USE_SIGCHLD
-   uv_signal_start(&loop->child_watcher, uv__chld, SIGCHLD);
-+  /* Hold SIGCHLD until this child is queued. The handler only writes the
-+   * signal pipe; uv__chld reaps on the loop thread. A signal delivered
-+   * before the insert is not repeated, so a child that has already exited
-+   * would be left unreaped. posix_spawn installs an empty mask on the child,
-+   * and the fork path clears the mask before exec. */
-+  sigemptyset(&chld_set);
-+  sigaddset(&chld_set, SIGCHLD);
-+  if (pthread_sigmask(SIG_BLOCK, &chld_set, &chld_old) != 0)
-+    abort();
- #endif
- 
-   /* Spawn the child */
-@@ -1128,7 +1141,18 @@
+@@ -1128,6 +1128,13 @@
      process->exit_cb = options->exit_cb;
      uv__queue_insert_tail(&loop->process_handles, &process->queue);
      uv__handle_start(process);
--  }
-+#ifdef UV_USE_SIGCHLD
-+    /* The child may already be a zombie. Reap on the next loop turn so
-+     * exit_cb runs after uv_spawn returns and stdio is open. waitpid still
-+     * collects the pid if SIGCHLD was dropped or delivered to another thread. */
++#if defined(__CYGWIN__) || defined(__MSYS__)
++    /* posix_spawn can return with the child already dead and no SIGCHLD
++     * for the loop to observe. uv__chld runs only after that signal, so
++     * reap once on the next turn. The exit callback still runs from uv_run,
++     * after stdio is open. */
 +    loop->flags |= UV_LOOP_REAP_CHILDREN;
 +#endif
-+  }
-+
-+#ifdef UV_USE_SIGCHLD
-+  if (pthread_sigmask(SIG_SETMASK, &chld_old, NULL) != 0)
-+    abort();
-+#endif
+   }
  
    for (i = 0; i < options->stdio_count; i++) {
-     err = uv__process_open_stream(options->stdio + i, pipes[i]);
 --- a/src/unix/core.c
 +++ b/src/unix/core.c
 @@ -459,6 +459,14 @@
