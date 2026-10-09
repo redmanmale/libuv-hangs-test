@@ -22,6 +22,19 @@ compiler_lines() {
   grep -E "Check for working C compiler|Check for working CXX compiler|Configuring done|Generating done|CMake Error" cmake.out || true
 }
 
+stop_pid() {
+  target="$1"
+  # Cygwin kill -9 does not unblock a process stuck in a Windows wait,
+  # and wait then never returns. TerminateProcess, then give up.
+  kill -f "$target" 2>/dev/null || true
+  taskkill //F //PID "$target" >/dev/null 2>&1 || true
+  n=0
+  while kill -0 "$target" 2>/dev/null && [ "$n" -lt 5 ]; do
+    sleep 1
+    n=$((n + 1))
+  done
+}
+
 dump_hang() {
   p="$1"
   echo "HANG pid=$p"
@@ -29,11 +42,8 @@ dump_hang() {
   ps -ef || true
   echo "=== fds ==="
   ls -l "/proc/$p/fd" || true
-  # tee reads cmake.fifo until cmake closes it. Kill first or this wait
-  # never returns and the job sits until it is cancelled.
-  kill -9 "$p" 2>/dev/null || true
-  wait "$p" 2>/dev/null || true
-  wait "$teepid" 2>/dev/null || true
+  stop_pid "$p"
+  stop_pid "$teepid"
   echo "=== cmake tail ==="
   tail -n 40 cmake.out || true
   compiler_lines
@@ -64,9 +74,6 @@ while [ "$i" -le "$TRIES" ]; do
     waited=$((waited + 1))
     if [ "$waited" -ge "$LIMIT" ] && ! has_child "$pid"; then
       dump_hang "$pid"
-      kill -9 "$pid" 2>/dev/null || true
-      wait "$pid" 2>/dev/null || true
-      wait "$teepid" 2>/dev/null || true
       echo "SUMMARY hung=1 attempt=$i finished=$finished c_works=$c_ok cxx_works=$cxx_ok configure_done=$config_ok"
       echo "CONFIGURE: hung on attempt $i before completion"
       exit 1
@@ -74,9 +81,6 @@ while [ "$i" -le "$TRIES" ]; do
     if [ "$waited" -ge 90 ]; then
       echo "SLOW attempt $i still alive after ${waited}s"
       dump_hang "$pid"
-      kill -9 "$pid" 2>/dev/null || true
-      wait "$pid" 2>/dev/null || true
-      wait "$teepid" 2>/dev/null || true
       echo "SUMMARY hung=1 attempt=$i finished=$finished c_works=$c_ok cxx_works=$cxx_ok configure_done=$config_ok"
       echo "CONFIGURE: still alive after ${waited}s on attempt $i"
       exit 1
