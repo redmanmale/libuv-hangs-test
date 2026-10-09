@@ -1,66 +1,40 @@
 --- a/src/unix/process.c
 +++ b/src/unix/process.c
-@@ -1050,6 +1050,10 @@
+@@ -854,6 +854,10 @@
    int err;
-   int exec_errorno;
-   int i;
+   posix_spawnattr_t attrs;
+   posix_spawn_file_actions_t actions;
 +#if defined(__CYGWIN__) || defined(__MSYS__)
 +  sigset_t chld_set;
 +  sigset_t chld_old;
 +#endif
  
-   assert(options->file != NULL);
-   assert(!(options->flags & ~(UV_PROCESS_DETACHED |
-@@ -1091,6 +1095,16 @@
+   if (!posix_spawn_works)
+     return UV_ENOSYS;
+@@ -878,10 +882,26 @@
+   uv_rwlock_wrlock(&loop->cloexec_lock);
+ #endif
  
- #ifdef UV_USE_SIGCHLD
-   uv_signal_start(&loop->child_watcher, uv__chld, SIGCHLD);
-+#endif
 +#if defined(__CYGWIN__) || defined(__MSYS__)
-+  /* posix_spawn of a native image can leave a zombie the loop never
-+   * hears about unless SIGCHLD stays pending until this pid is queued.
-+   * The handler only writes the signal pipe. posix_spawn installs an
-+   * empty mask on the child, and the fork path clears it before exec. */
++  /* Cygwin implements posix_spawn as fork plus a semaphore wait, and the
++   * child then overlays a native image. The fork path already blocks signals
++   * across fork. Do the same here so the SIGCHLD handler does not run inside
++   * that call. posix_spawn installs an empty mask on the child. */
 +  sigemptyset(&chld_set);
 +  sigaddset(&chld_set, SIGCHLD);
 +  if (pthread_sigmask(SIG_BLOCK, &chld_set, &chld_old) != 0)
 +    abort();
- #endif
- 
-   /* Spawn the child */
-@@ -1128,7 +1142,17 @@
-     process->exit_cb = options->exit_cb;
-     uv__queue_insert_tail(&loop->process_handles, &process->queue);
-     uv__handle_start(process);
--  }
-+#if defined(__CYGWIN__) || defined(__MSYS__)
-+    /* Reap on the next loop turn. exit_cb runs from uv_run, after stdio
-+     * is open, not from inside uv_spawn. */
-+    loop->flags |= UV_LOOP_REAP_CHILDREN;
 +#endif
-+  }
++
+   /* Try to spawn options->file resolving in the provided environment
+    * if any. */
+   err = uv__spawn_resolve_and_spawn(options, &attrs, &actions, pid);
+   assert(err != ENOSYS);
 +
 +#if defined(__CYGWIN__) || defined(__MSYS__)
 +  if (pthread_sigmask(SIG_SETMASK, &chld_old, NULL) != 0)
 +    abort();
 +#endif
  
-   for (i = 0; i < options->stdio_count; i++) {
-     err = uv__process_open_stream(options->stdio + i, pipes[i]);
---- a/src/unix/core.c
-+++ b/src/unix/core.c
-@@ -459,6 +459,14 @@
- 
-     uv__io_poll(loop, timeout);
- 
-+    /* A child queued by uv_spawn may already have exited. kqueue reaps inside
-+     * uv__io_poll and clears this flag. Clear before waiting so an exit_cb
-+     * that spawns again can request another turn. */
-+    if (loop->flags & UV_LOOP_REAP_CHILDREN) {
-+      loop->flags &= ~UV_LOOP_REAP_CHILDREN;
-+      uv__wait_children(loop);
-+    }
-+
-     /* Process immediate callbacks (e.g. write_cb) a small fixed number of
-      * times to avoid loop starvation.*/
-     for (r = 0; r < 8 && !uv__queue_empty(&loop->pending_queue); r++)
+ #ifndef __APPLE__
+   /* Release lock in parent process. */
