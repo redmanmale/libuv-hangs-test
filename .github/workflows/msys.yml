@@ -133,12 +133,18 @@ jobs:
           esac
 
           set +e
-          sh ./confirm.sh
-          rc=$?
+          set +o pipefail
+          sh ./confirm.sh | tee confirm.log
+          rc=${PIPESTATUS[0]}
           set -e
-          if [ "$rc" -eq 0 ]; then
-            echo "MSYS: hang did not reproduce on stock libuv 1.53.0"
-          else
-            echo "MSYS: stock libuv 1.53.0 did not pass the configure loop"
+          if grep -q 'hung=1' confirm.log; then
+            echo "MSYS: hang reproduced on stock libuv 1.53.0"
+            exit 1
           fi
+          if grep -q 'hung=0' confirm.log && grep -q "configure_done=${TRIES}" confirm.log; then
+            echo "MSYS: hang did not reproduce on stock libuv 1.53.0"
+            echo "ABI try_compile finished. The works-check is skipped because CMake treats the MinGW compiler as a cross compile."
+            exit 0
+          fi
+          echo "MSYS: stock libuv 1.53.0 did not pass the configure loop"
           exit "$rc"
