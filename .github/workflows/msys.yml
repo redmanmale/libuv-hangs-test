@@ -1,0 +1,143 @@
+name: msys
+
+on:
+  push:
+    paths:
+      - '.github/workflows/msys.yml'
+      - 'confirm.sh'
+  workflow_dispatch:
+
+jobs:
+  stock:
+    name: stock libuv then configure
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Clone stock libuv v1.53.0
+        shell: pwsh
+        run: |
+          $src = Join-Path $env:GITHUB_WORKSPACE 'libuv-src'
+          if (Test-Path $src) { Remove-Item -Recurse -Force $src }
+          git -c core.autocrlf=false clone --depth 1 --branch v1.53.0 https://github.com/libuv/libuv.git $src
+          git -C $src rev-parse HEAD
+          Write-Output "stock v1.53.0; not applying patches/reap-after-queue.patch"
+
+      - name: Install MSYS
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MSYS
+          path-type: minimal
+          update: true
+          install: >-
+            autoconf
+            automake
+            libtool
+            make
+            gcc
+            cmake
+            libuv
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-binutils
+
+      - name: Build stock msys libuv and run configures
+        shell: msys2 {0}
+        env:
+          TRIES: "40"
+          LIMIT: "20"
+        run: |
+          set -eu
+          set -o pipefail
+          cd "$(cygpath -u "$GITHUB_WORKSPACE")"
+          src="$(cygpath -u "$GITHUB_WORKSPACE")/libuv-src"
+
+          echo "=== identity ==="
+          echo "MSYSTEM=${MSYSTEM-}"
+          uname -a
+          pacman -Q cmake libuv gcc
+          gcc -dumpmachine
+          echo | gcc -dM -E - | grep -E '__CYGWIN__|__MSYS__' || true
+          if [ "${MSYSTEM-}" != "MSYS" ]; then
+            echo "expected MSYSTEM=MSYS"
+            exit 1
+          fi
+          if ! echo | gcc -dM -E - | grep -q '__CYGWIN__'; then
+            echo "MSYS gcc does not define __CYGWIN__; unix libuv is not this toolchain"
+            exit 1
+          fi
+          cmake_bin=$(command -v cmake)
+          case "$cmake_bin" in
+            /usr/bin/cmake|/usr/bin/cmake.exe) ;;
+            *)
+              echo "cmake is $cmake_bin, expected /usr/bin/cmake"
+              exit 1
+              ;;
+          esac
+
+          echo "=== cmake libuv dependency ==="
+          ldd "$cmake_bin"
+          uv_path=$(ldd "$cmake_bin" | sed -n 's/.*=> *\(\/usr\/bin\/[^ ]*uv[^ ]*\.dll\).*/\1/p')
+          uv_count=$(printf '%s\n' "$uv_path" | grep -c .)
+          if [ "$uv_count" -ne 1 ]; then
+            echo "expected one /usr/bin uv dll from cmake, found $uv_count"
+            printf '%s\n' "$uv_path"
+            exit 1
+          fi
+          echo "cmake loads $uv_path"
+
+          echo "=== stock tree ==="
+          git -C "$src" diff --quiet
+          if grep -q 'posix_spawn as fork plus a semaphore wait' "$src/src/unix/process.c"; then
+            echo "source already contains the SIGCHLD mask"
+            exit 1
+          fi
+
+          cd "$src"
+          sh autogen.sh && ./configure && make -j"$(nproc)"
+          built="$src/.libs/$(basename "$uv_path")"
+          if [ ! -f "$built" ]; then
+            echo "built tree has no $(basename "$uv_path"); cmake loads $uv_path"
+            ls -la "$src/.libs" || true
+            exit 1
+          fi
+          cp -f "$uv_path" "$uv_path.stock"
+          cp -f "$built" "$uv_path"
+          cmp "$uv_path" "$built"
+          echo "replaced $uv_path with $built"
+          echo "stock copy kept at $uv_path.stock"
+
+          cd "$(cygpath -u "$GITHUB_WORKSPACE")"
+          export PATH="/usr/bin:$PATH:/mingw64/bin"
+          triplet=$(command -v x86_64-w64-mingw32-gcc)
+          case "$triplet" in
+            /mingw64/bin/*) ;;
+            *)
+              echo "triplet compiler is ${triplet-missing}, expected /mingw64/bin"
+              exit 1
+              ;;
+          esac
+          command -v x86_64-w64-mingw32-g++ >/dev/null
+          command -v x86_64-w64-mingw32-windres >/dev/null
+          if echo | x86_64-w64-mingw32-gcc -dM -E - | grep -q '__CYGWIN__'; then
+            echo "triplet compiler defines __CYGWIN__; expected a native MinGW image"
+            exit 1
+          fi
+          case "$(command -v cmake)" in
+            /usr/bin/cmake|/usr/bin/cmake.exe) ;;
+            *)
+              echo "cmake moved off /usr/bin after PATH change: $(command -v cmake)"
+              exit 1
+              ;;
+          esac
+
+          set +e
+          sh ./confirm.sh
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            echo "MSYS: hang did not reproduce on stock libuv 1.53.0"
+          else
+            echo "MSYS: stock libuv 1.53.0 did not pass the configure loop"
+          fi
+          exit "$rc"
