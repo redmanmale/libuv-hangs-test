@@ -109,11 +109,14 @@ jobs:
           echo "stock copy kept at $uv_path.stock"
 
           cd "$(cygpath -u "$GITHUB_WORKSPACE")"
+          if [ ! -x /mingw64/bin/x86_64-w64-mingw32-windres.exe ] && [ -x /mingw64/bin/windres.exe ]; then
+            ln -s windres.exe /mingw64/bin/x86_64-w64-mingw32-windres.exe
+          fi
           export PATH="/usr/bin:/mingw64/bin:$PATH"
           for tool in x86_64-w64-mingw32-gcc x86_64-w64-mingw32-g++ x86_64-w64-mingw32-windres; do
             if [ ! -x "/mingw64/bin/${tool}.exe" ]; then
               echo "missing /mingw64/bin/${tool}.exe"
-              ls -ld /mingw64 /mingw64/bin || true
+              ls /mingw64/bin/*windres* /mingw64/bin/*gcc* 2>/dev/null || true
               exit 1
             fi
           done
